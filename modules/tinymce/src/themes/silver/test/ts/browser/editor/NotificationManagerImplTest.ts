@@ -1,6 +1,6 @@
 import { ApproxStructure, Assertions, Mouse, UiFinder, Waiter } from '@ephox/agar';
 import { context, describe, it } from '@ephox/bedrock-client';
-import { Focus, SugarBody, SugarElement, Traverse } from '@ephox/sugar';
+import { Css, Focus, Scroll, SugarBody, SugarElement, Traverse } from '@ephox/sugar';
 import { TinyHooks } from '@ephox/wrap-mcagar';
 import { assert } from 'chai';
 
@@ -8,6 +8,7 @@ import Editor from 'tinymce/core/api/Editor';
 import { NotificationApi } from 'tinymce/core/api/NotificationManager';
 import Theme from 'tinymce/themes/silver/Theme';
 
+import * as PageScroll from '../../module/PageScroll';
 import { resizeToPos } from '../../module/UiUtils';
 
 describe('browser.tinymce.themes.silver.editor.NotificationManagerImplTest', () => {
@@ -27,6 +28,12 @@ describe('browser.tinymce.themes.silver.editor.NotificationManagerImplTest', () 
     const left = elem.dom.offsetLeft;
     assert.approximately(top, y, diff, `${prefix} top position should be ${y}px~=${top}px`);
     assert.approximately(left, x, diff, `${prefix} left position should be ${x}px~=${left}px`);
+  };
+
+  const assertPositioning = (prefix: string, notification: NotificationApi, pos: string = 'absolute') => {
+    const elem = Traverse.parent(SugarElement.fromDom(notification.getEl())).getOrDie() as SugarElement<HTMLElement>;
+    const position = Css.get(elem, 'position');
+    assert.equal(position, pos, `${prefix} position should be ${pos}`);
   };
 
   context('Top toolbar positioning', () => {
@@ -151,6 +158,30 @@ describe('browser.tinymce.themes.silver.editor.NotificationManagerImplTest', () 
       notification.progressBar.value(100);
       assertStructure('Check notification structure with 100% progress', notification, 'success', 'Message', 100);
       notification.close();
+    });
+
+    it('TINY-7894: Check notifications are rendered offscreen but are docked', async () => {
+      const editor = hook.editor();
+      const cleanup = PageScroll.setup(editor, 2000);
+
+      Scroll.to(0, 0);
+      const notification = openNotification(editor, 'success', 'Message');
+      assertPosition('Offscreen notification', notification, 226, -2200);
+      assertPositioning('Offscreen notification', notification, 'absolute');
+
+      // Scroll until docked
+      Scroll.to(0, 2300);
+      await Waiter.pTryUntil('Wait for notification to dock', () => {
+        assertPosition('Offscreen notification (docked)', notification, 226, 0);
+        assertPositioning('Offscreen notification (docked)', notification, 'fixed');
+      });
+
+      // Scroll until hidden
+      Scroll.to(0, 4000);
+      await UiFinder.pWaitFor('Wait for notification to hide', SugarBody.body(), '.tox-notifications-container.tox-notification-dock-fadeout');
+
+      notification.close();
+      cleanup();
     });
   });
 

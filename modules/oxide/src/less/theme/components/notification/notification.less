@@ -201,4 +201,23 @@
     grid-row-start: 2;
     justify-self: center;
   }
+
+  // Transition styles for notifications
+  .tox-notification-dock-fadeout {
+    opacity: 0;
+    visibility: hidden;
+  }
+
+  .tox-notification-dock-fadein {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  .tox-notification-dock-transition {
+    transition: visibility 0s linear .2s, opacity .2s ease;
+  }
+
+  .tox-notification-dock-transition.tox-notification-dock-fadein {
+    transition-delay: 0s;
+  }
 }

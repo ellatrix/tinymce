@@ -5,14 +5,15 @@
  * For commercial licenses see https://www.tiny.cloud/
  */
 
-import { Gui, GuiFactory, InlineView, Layout, LayoutInset, NodeAnchorSpec } from '@ephox/alloy';
-import { Arr, Optional } from '@ephox/katamari';
-import { SugarBody, SugarElement } from '@ephox/sugar';
+import { Behaviour, Boxes, Docking, Gui, GuiFactory, InlineView, Layout, LayoutInset, NodeAnchorSpec } from '@ephox/alloy';
+import { Arr, Fun, Optional } from '@ephox/katamari';
+import { Height, SugarBody, SugarElement, Traverse, Width } from '@ephox/sugar';
 
 import Editor from 'tinymce/core/api/Editor';
 import { NotificationApi, NotificationManagerImpl, NotificationSpec } from 'tinymce/core/api/NotificationManager';
 import Delay from 'tinymce/core/api/util/Delay';
 
+import * as Settings from '../api/Settings';
 import { UiFactoryBackstage } from '../backstage/Backstage';
 import { Notification } from '../ui/general/Notification';
 
@@ -22,6 +23,28 @@ interface Extras {
 
 export default (editor: Editor, extras: Extras, uiMothership: Gui.GuiSystem): NotificationManagerImpl => {
   const sharedBackstage = extras.backstage.shared;
+  const isStickyToolbar = Settings.isStickyToolbar(editor);
+  const isToolbarLocationTop = sharedBackstage.header.isPositionedAtTop();
+
+  const getBehaviours = () => {
+    const baseClass = 'tox-notification-dock';
+    // Never use docking if sticky toolbars is enabled
+    if (isStickyToolbar) {
+      return [];
+    } else {
+      return [
+        Docking.config({
+          contextual: {
+            lazyContext: () => Optional.some(Boxes.box(SugarElement.fromDom(editor.getContentAreaContainer()))),
+            fadeInClass: `${baseClass}-fadein`,
+            fadeOutClass: `${baseClass}-fadeout`,
+            transitionClass: `${baseClass}-transition`
+          },
+          modes: isToolbarLocationTop ? [ 'top' ] : [ 'bottom' ]
+        })
+      ];
+    }
+  };
 
   const getLayoutDirection = (rel: 'tc-tc' | 'bc-bc' | 'bc-tc' | 'tc-bc') => {
     switch (rel) {
@@ -37,26 +60,16 @@ export default (editor: Editor, extras: Extras, uiMothership: Gui.GuiSystem): No
     }
   };
 
-  // Since the viewport will change based on the present notifications, we need to move them all to the
-  // top left of the viewport to give an accurate size measurement so we can position them later.
-  const prePositionNotifications = (notifications: NotificationApi[]) => {
-    Arr.each(notifications, (notification) => notification.moveTo(0, 0));
-  };
-
-  const positionNotifications = (notifications: NotificationApi[]) => {
+  const reposition = (notifications: NotificationApi[]) => {
     if (notifications.length > 0) {
-      Arr.head(notifications).each((firstItem) => firstItem.moveRel(null, 'banner'));
       Arr.each(notifications, (notification, index) => {
-        if (index > 0) {
+        if (index === 0) {
+          notification.moveRel(null, 'banner');
+        } else {
           notification.moveRel(notifications[index - 1].getEl(), 'bc-tc');
         }
-      });
+      })
     }
-  };
-
-  const reposition = (notifications: NotificationApi[]) => {
-    prePositionNotifications(notifications);
-    positionNotifications(notifications);
   };
 
   const open = (settings: NotificationSpec, closeCallback: () => void): NotificationApi => {
@@ -88,7 +101,8 @@ export default (editor: Editor, extras: Extras, uiMothership: Gui.GuiSystem): No
         },
         lazySink: sharedBackstage.getSink,
         fireDismissalEventInstead: { },
-        ...sharedBackstage.header.isPositionedAtTop() ? { } : { fireRepositionEventInstead: { }}
+        inlineBehaviours: Behaviour.derive(getBehaviours()),
+        ...isToolbarLocationTop ? { } : { fireRepositionEventInstead: { }}
       })
     );
 
@@ -100,16 +114,28 @@ export default (editor: Editor, extras: Extras, uiMothership: Gui.GuiSystem): No
       }, settings.timeout);
     }
 
+    const getBounds = () => {
+      // Notifications shouldn't be bound to displaying within the viewport and can render anywhere inside the document
+      const documentElement = Traverse.documentElement(SugarBody.body());
+      const bounds = Boxes.bounds(0, 0, Width.get(documentElement), Height.get(documentElement));
+      return Optional.some(bounds);
+    };
+
+    const refreshDocking = isStickyToolbar ? Fun.noop : () => {
+      Docking.refresh(notificationWrapper);
+    };
+
     return {
       close,
       moveTo: (x: number, y: number) => {
-        InlineView.showAt(notificationWrapper, GuiFactory.premade(notification), {
+        InlineView.showWithinBounds(notificationWrapper, GuiFactory.premade(notification), {
           anchor: {
             type: 'makeshift',
             x,
             y
           }
-        });
+        }, getBounds);
+        refreshDocking();
       },
       moveRel: (element: Element, rel: 'tc-tc' | 'bc-bc' | 'bc-tc' | 'tc-bc' | 'banner') => {
         if (rel !== 'banner') {
@@ -123,10 +149,11 @@ export default (editor: Editor, extras: Extras, uiMothership: Gui.GuiSystem): No
               onLtr: () => [ layoutDirection ]
             }
           };
-          InlineView.showAt(notificationWrapper, GuiFactory.premade(notification), { anchor: nodeAnchor });
+          InlineView.showWithinBounds(notificationWrapper, GuiFactory.premade(notification), { anchor: nodeAnchor }, getBounds);
         } else {
-          InlineView.showAt(notificationWrapper, GuiFactory.premade(notification), { anchor: sharedBackstage.anchors.banner() });
+          InlineView.showWithinBounds(notificationWrapper, GuiFactory.premade(notification), { anchor: sharedBackstage.anchors.banner() }, getBounds);
         }
+        refreshDocking();
       },
       text: (nuText: string) => {
         // check if component is still mounted
