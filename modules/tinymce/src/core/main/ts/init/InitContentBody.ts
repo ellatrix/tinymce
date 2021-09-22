@@ -401,8 +401,8 @@ const initContentBody = (editor: Editor, skipWrite?: boolean) => {
 
   if (editor.inline) {
     DOM.addClass(targetElm, 'mce-content-body');
-    editor.contentDocument = doc = document;
-    editor.contentWindow = window;
+    editor.contentDocument = doc = targetElm.ownerDocument;
+    editor.contentWindow = doc.defaultView;
     editor.bodyElement = targetElm;
     editor.contentAreaContainer = targetElm;
   }
